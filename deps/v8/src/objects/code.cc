@@ -62,8 +62,8 @@ int Code::constant_pool_size() const {
 bool Code::has_constant_pool() const { return constant_pool_size() > 0; }
 
 int Code::code_comments_size() const {
-  DCHECK_GE(InstructionSize() - code_comments_offset(), 0);
-  return InstructionSize() - code_comments_offset();
+  DCHECK_GE(unwinding_info_offset() - code_comments_offset(), 0);
+  return unwinding_info_offset() - code_comments_offset();
 }
 
 bool Code::has_code_comments() const { return code_comments_size() > 0; }
@@ -88,22 +88,19 @@ void Code::Relocate(intptr_t delta) {
 }
 
 void Code::FlushICache() const {
+  // TODO(jgruber,v8:11036): This should likely flush only actual instructions,
+  // not metadata.
   FlushInstructionCache(raw_instruction_start(), raw_instruction_size());
 }
 
 void Code::CopyFromNoFlush(Heap* heap, const CodeDesc& desc) {
   // Copy code.
+  // TODO(jgruber,v8:11036): Distinguish instruction and metadata areas.
   CopyBytes(reinterpret_cast<byte*>(raw_instruction_start()), desc.buffer,
             static_cast<size_t>(desc.instr_size));
-
-  // Copy unwinding info, if any.
-  if (desc.unwinding_info) {
-    DCHECK_GT(desc.unwinding_info_size, 0);
-    set_unwinding_info_size(desc.unwinding_info_size);
-    CopyBytes(reinterpret_cast<byte*>(unwinding_info_start()),
-              desc.unwinding_info,
-              static_cast<size_t>(desc.unwinding_info_size));
-  }
+  // TODO(jgruber,v8:11036): Merge with the above.
+  CopyBytes(reinterpret_cast<byte*>(raw_instruction_start() + desc.instr_size),
+            desc.unwinding_info, static_cast<size_t>(desc.unwinding_info_size));
 
   // Copy reloc info.
   CopyRelocInfoToByteArray(unchecked_relocation_info(), desc);
@@ -199,17 +196,6 @@ int AbstractCode::SourceStatementPosition(int offset) {
     }
   }
   return statement_position;
-}
-
-void Code::PrintDeoptLocation(FILE* out, const char* str, Address pc) {
-  Deoptimizer::DeoptInfo info = Deoptimizer::GetDeoptInfo(*this, pc);
-  class SourcePosition pos = info.position;
-  if (info.deopt_reason != DeoptimizeReason::kUnknown || pos.IsKnown()) {
-    PrintF(out, "%s", str);
-    OFStream outstr(out);
-    pos.Print(outstr, *this);
-    PrintF(out, ", %s\n", DeoptimizeReasonToString(info.deopt_reason));
-  }
 }
 
 bool Code::CanDeoptAt(Address pc) {
@@ -712,8 +698,7 @@ void Code::Disassemble(const char* name, std::ostream& os, Isolate* isolate,
 
   {
     SourcePositionTableIterator it(
-        SourcePositionTableIfCollected(),
-        SourcePositionTableIterator::kJavaScriptOnly);
+        SourcePositionTable(), SourcePositionTableIterator::kJavaScriptOnly);
     if (!it.done()) {
       os << "Source positions:\n pc offset  position\n";
       for (; !it.done(); it.Advance()) {
@@ -726,7 +711,7 @@ void Code::Disassemble(const char* name, std::ostream& os, Isolate* isolate,
   }
 
   {
-    SourcePositionTableIterator it(SourcePositionTableIfCollected(),
+    SourcePositionTableIterator it(SourcePositionTable(),
                                    SourcePositionTableIterator::kExternalOnly);
     if (!it.done()) {
       os << "External Source positions:\n pc offset  fileid  line\n";
@@ -808,8 +793,7 @@ void BytecodeArray::Disassemble(std::ostream& os) {
   os << "Frame size " << frame_size() << "\n";
 
   Address base_address = GetFirstBytecodeAddress();
-  SourcePositionTableIterator source_positions(
-      SourcePositionTableIfCollected());
+  SourcePositionTableIterator source_positions(SourcePositionTable());
 
   // Storage for backing the handle passed to the iterator. This handle won't be
   // updated by the gc, but that's ok because we've disallowed GCs anyway.
@@ -868,11 +852,12 @@ void BytecodeArray::Disassemble(std::ostream& os) {
   }
 #endif
 
-  os << "Source Position Table (size = "
-     << SourcePositionTableIfCollected().length() << ")\n";
+  ByteArray source_position_table = SourcePositionTable();
+  os << "Source Position Table (size = " << source_position_table.length()
+     << ")\n";
 #ifdef OBJECT_PRINT
-  if (SourcePositionTableIfCollected().length() > 0) {
-    os << Brief(SourcePositionTableIfCollected()) << std::endl;
+  if (source_position_table.length() > 0) {
+    os << Brief(source_position_table) << std::endl;
   }
 #endif
 }
@@ -1058,27 +1043,7 @@ void DependentCode::DeoptimizeDependentCodeGroup(
 
 void Code::SetMarkedForDeoptimization(const char* reason) {
   set_marked_for_deoptimization(true);
-  if (FLAG_trace_deopt &&
-      (deoptimization_data() != GetReadOnlyRoots().empty_fixed_array())) {
-    DeoptimizationData deopt_data =
-        DeoptimizationData::cast(deoptimization_data());
-    auto isolate = GetIsolate();
-    CodeTracer::Scope scope(isolate->GetCodeTracer());
-    PrintF(scope.file(), "[marking dependent code " V8PRIxPTR_FMT " ", ptr());
-    deopt_data.SharedFunctionInfo().ShortPrint(scope.file());
-    PrintF(" (opt #%d) for deoptimization, reason: %s]\n",
-           deopt_data.OptimizationId().value(), reason);
-    {
-      HandleScope scope(isolate);
-      PROFILE(
-          isolate,
-          CodeDependencyChangeEvent(
-              handle(*this, isolate),
-              handle(SharedFunctionInfo::cast(deopt_data.SharedFunctionInfo()),
-                     isolate),
-              reason));
-    }
-  }
+  Deoptimizer::TraceMarkForDeoptimization(*this, reason);
 }
 
 const char* DependentCode::DependencyGroupName(DependencyGroup group) {

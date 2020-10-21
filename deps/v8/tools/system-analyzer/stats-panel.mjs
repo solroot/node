@@ -8,8 +8,8 @@ defineCustomElement(
   "stats-panel",
   (templateText) =>
     class StatsPanel extends V8CustomElement {
-      #timeline;
-      #transitions;
+      _timeline;
+      _transitions;
       constructor() {
         super(templateText);
       }
@@ -20,19 +20,19 @@ defineCustomElement(
 
       set timeline(value) {
         //TODO(zcankara) Trigger update
-        this.#timeline = value;
+        this._timeline = value;
       }
 
       get timeline() {
-        return this.#timeline;
+        return this._timeline;
       }
 
       set transitions(value) {
-        this.#transitions = value;
+        this._transitions = value;
       }
 
       get transitions() {
-        return this.#transitions;
+        return this._transitions;
       }
 
       filterUniqueTransitions(filter) {
@@ -52,7 +52,7 @@ defineCustomElement(
       }
 
       updateGeneralStats() {
-        console.assert(this.#timeline !== undefined, "Timeline not set yet!");
+        console.assert(this._timeline !== undefined, "Timeline not set yet!");
         let pairs = [
           ["Total", null, (e) => true],
           ["Transitions", "primary", (e) => e.edge && e.edge.isTransition()],
@@ -81,7 +81,8 @@ defineCustomElement(
         let text = "";
         let tableNode = this.table("transitionType");
         tableNode.innerHTML =
-          "<thead><tr><td>Color</td><td>Type</td><td>Count</td><td>Percent</td></tr></thead>";
+          "<thead><tr><td>Color</td><td>Type</td><td>Count</td>" +
+          "<td>Percent</td></tr></thead>";
         let name, filter;
         let total = this.timeline.size();
         pairs.forEach(([name, color, filter]) => {
@@ -91,6 +92,7 @@ defineCustomElement(
           } else {
             row.appendChild(this.td(""));
           }
+          row.classList.add('clickable');
           row.onclick = (e) => {
             // lazily compute the stats
             let node = e.target.parentNode;
@@ -119,6 +121,7 @@ defineCustomElement(
           .forEach(([name, maps]) => {
             let row = this.tr();
             row.maps = maps;
+            row.classList.add('clickable');
             row.addEventListener("click", (e) =>
               this.dispatchEvent(
                 new SelectionEvent(

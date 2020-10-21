@@ -45,7 +45,8 @@ class UnifiedHeapTest : public TestWithHeapInternals {
       : saved_incremental_marking_wrappers_(FLAG_incremental_marking_wrappers) {
     FLAG_incremental_marking_wrappers = false;
     cppgc::InitializeProcess(V8::GetCurrentPlatform()->GetPageAllocator());
-    cpp_heap_ = std::make_unique<CppHeap>(v8_isolate(), 0);
+    cpp_heap_ = std::make_unique<CppHeap>(
+        v8_isolate(), std::vector<std::unique_ptr<cppgc::CustomSpaceBase>>());
     heap()->SetEmbedderHeapTracer(&cpp_heap());
   }
 
@@ -92,6 +93,8 @@ TEST_F(UnifiedHeapTest, FindingV8ToBlinkReference) {
   CollectGarbage(OLD_SPACE);
   EXPECT_EQ(0u, Wrappable::destructor_callcount);
   ResetWrappableConnection(api_object);
+  CollectGarbage(OLD_SPACE);
+  // Calling CollectGarbage twice to force the first GC to finish sweeping.
   CollectGarbage(OLD_SPACE);
   EXPECT_EQ(1u, Wrappable::destructor_callcount);
 }
